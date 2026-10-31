@@ -38,7 +38,40 @@ The analysis pipeline should support different company universes without requiri
 - Specify the observation period, sampling frequency, and company-selection criteria.
 - Document whether the dataset uses a fixed constituent list or historical index membership, including the resulting survivorship-bias limitations.
 
-The data provider, historical period, sampling frequency, and exact constituent-selection policy remain to be selected.
+The historical constituent data provider, sampling frequency, and exact constituent-selection policy remain to be selected.
+
+#### Index and constituent-data downloader
+
+[`Data Collection.py`](./Data%20Collection.py) downloads daily history for Yahoo Finance's `^GSPC` S&P 500 index symbol using `yfinance`. It requests the 50 calendar years preceding the run date, writes the returned OHLCV data to `data/sp500_daily_50y.csv`, and accepts `--output` to choose another CSV path. The provider may not have data for every requested date; the script reports the actual first and last dates returned.
+
+Install the dependency from the project directory:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Running `python "Data Collection.py"` downloads the current S&P 500 constituents, including their current GICS sectors, then writes one CSV per company. The script fetches the current list from Wikipedia's S&P 500 constituents page with a normal identified request. It also merges historical membership data from `data\sp500_historical_constituents.csv` if that optional file exists. To download only the index series, run `python "Data Collection.py" --index`.
+
+To include former and delisted companies and accurately identify historical index membership, provide a historical membership manifest with one row per S&P 500 membership interval. The manifest is optional for downloading current members, but required to include the historical universe. It must have these columns:
+
+| Column | Meaning |
+| --- | --- |
+| `symbol` | Yahoo Finance ticker symbol |
+| `company` | Company name |
+| `delisted` | `true` or `false`; this is separate from leaving the index |
+| `sector` | Company's main sector; optional, defaults to `Unknown` |
+| `membership_start` | First membership date in `YYYY-MM-DD` format |
+| `membership_end` | Last membership date in `YYYY-MM-DD` format; leave blank for a current membership interval |
+
+If a company entered the index more than once, include a row for each interval using the same ticker and consistent company/delisted/sector values. Use a single consistent classification system (for example, GICS) across the manifest. Save it as `data\sp500_historical_constituents.csv` for automatic merging, or pass its path explicitly:
+
+```powershell
+python "Data Collection.py" --constituents path\to\your_constituents.csv
+```
+
+The script downloads each distinct symbol once to `data/companies/<symbol>.csv`. Every file includes `Ticker`, `Company`, `Sector`, `Delisted`, `MembershipSource`, and `InIndex`. For tickers in a historical manifest, `InIndex` marks the supplied membership intervals. For current-list-only tickers, earlier `InIndex` values are blank (unknown) rather than falsely labeling each company as a constituent for the full 50 years. Sector is a static label, not a historically time-varying classification; use a dated sector source if the analysis needs historical sector changes. Missing sector values are written as `Unknown`. The company output directory can be changed with `--company-output`.
+
+Without a historical manifest, former/delisted companies are not included. The current constituent list and the `^GSPC` index history do not provide a complete 50-year membership record. To cover the historical universe without survivorship bias, populate the manifest from a reliable point-in-time constituent source that includes removed companies and delisted securities. Yahoo Finance may not have complete history for every delisted ticker; symbols with no returned history are reported, and the script exits unsuccessfully rather than implying the download is complete.
 
 ### 2. Dependency estimation and network construction
 
