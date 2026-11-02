@@ -73,6 +73,12 @@ The script downloads each distinct symbol once to `data/companies/<symbol>.csv`.
 
 Without a historical manifest, former/delisted companies are not included. The current constituent list and the `^GSPC` index history do not provide a complete 50-year membership record. To cover the historical universe without survivorship bias, populate the manifest from a reliable point-in-time constituent source that includes removed companies and delisted securities. Yahoo Finance may not have complete history for every delisted ticker; symbols with no returned history are reported, and the script exits unsuccessfully rather than implying the download is complete.
 
+#### Preprocessing company CSVs
+
+Run `python "Data Preprocessing.py"` after downloading the company histories. It reads `data/companies/` and writes each cleaned ticker file as `data/companies-prep/<ticker>-prep.csv`, removing membership/ticker/company/sector/delisting metadata from the price series. It writes `data/company-summary-prep.csv` with coverage and missing-session statistics and `data/sector-summary-prep.csv` with one row per sector-company pair and the sector company count repeated on each row.
+
+Expected sessions are taken from the downloaded Yahoo Finance `^GSPC` daily history in `data/sp500_daily_50y.csv`. This provides a practical market-session calendar, but if Yahoo's index history itself omits a trading session, the script cannot identify that session as missing from this calendar.
+
 ### 2. Dependency estimation and network construction
 
 - Estimate pairwise dependencies within each historical time window.
