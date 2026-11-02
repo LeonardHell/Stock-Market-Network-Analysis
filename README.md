@@ -75,7 +75,7 @@ Without a historical manifest, former/delisted companies are not included. The c
 
 #### Preprocessing company CSVs
 
-Run `python "Data Preprocessing.py"` after downloading the company histories. It reads `data/companies/` and writes each cleaned ticker file as `data/companies-prep/<ticker>-prep.csv`, removing membership/ticker/company/sector/delisting metadata from the price series. It writes `data/company-summary-prep.csv` with coverage and missing-session statistics and `data/sector-summary-prep.csv` with one row per sector-company pair and the sector company count repeated on each row.
+Run `python "Data Preprocessing.py"` after downloading the company histories. It reads `data/companies/` and writes each cleaned ticker file as `data/companies-prep/<ticker>-prep.csv`, removing membership/ticker/company/sector/delisting metadata from the price series. Each prepared price file also includes simple `Return` and `LogReturn` columns, calculated from consecutive `Adj Close` values (or `Close` if adjusted close is unavailable). The first observation, and any observation without a valid positive price transition, has `NaN` for both returns. It writes `data/company-summary-prep.csv` with coverage and missing-session statistics and `data/sector-summary-prep.csv` with one row per sector-company pair and the sector company count repeated on each row.
 
 Expected sessions are taken from the downloaded Yahoo Finance `^GSPC` daily history in `data/sp500_daily_50y.csv`. This provides a practical market-session calendar, but if Yahoo's index history itself omits a trading session, the script cannot identify that session as missing from this calendar.
 

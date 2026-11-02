@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 from datetime import date
+import math
 from pathlib import Path
 
 
@@ -105,18 +106,77 @@ def process_company_file(
             raise ValueError(f"{source_path} must contain a 'Date' column.")
 
         source_fields = reader.fieldnames
-        rows: list[dict[str, str]] = []
+        price_column = (
+            "Adj Close" if "Adj Close" in source_fields else "Close"
+        )
+        if price_column not in source_fields:
+            raise ValueError(
+                f"{source_path} must contain either 'Adj Close' or 'Close' "
+                "to calculate returns."
+            )
+
+        output_fields = [
+            field
+            for field in source_fields
+            if field.strip().lower() not in METADATA_COLUMNS
+            and field not in {"Return", "LogReturn"}
+        ]
+        output_fields.extend(["Return", "LogReturn"])
+        output_path = output_dir / f"{source_path.stem}-prep.csv"
         observed_dates: set[date] = set()
         metadata: dict[str, str] = {}
-        for line_number, row in enumerate(reader, start=2):
-            observed_day = parse_date(row.get("Date", ""), source_path, line_number)
-            observed_dates.add(observed_day)
-            for key, value in row.items():
-                if key is not None and key.strip().lower() in METADATA_COLUMNS:
-                    metadata.setdefault(key.strip().lower(), value or "")
-            rows.append(row)
+        observation_count = 0
+        previous_price: float | None = None
+        with output_path.open("w", newline="", encoding="utf-8") as output_file:
+            writer = csv.DictWriter(
+                output_file,
+                fieldnames=output_fields,
+                extrasaction="ignore",
+            )
+            writer.writeheader()
+            for line_number, row in enumerate(reader, start=2):
+                observed_day = parse_date(
+                    row.get("Date", ""), source_path, line_number
+                )
+                observed_dates.add(observed_day)
+                observation_count += 1
+                for key, value in row.items():
+                    if (
+                        key is not None
+                        and key.strip().lower() in METADATA_COLUMNS
+                    ):
+                        metadata.setdefault(key.strip().lower(), value or "")
 
-    if not rows:
+                raw_price = (row.get(price_column) or "").strip()
+                try:
+                    price = float(raw_price)
+                except ValueError:
+                    price = math.nan
+                if not math.isfinite(price) or price <= 0:
+                    price = math.nan
+
+                if previous_price is None or math.isnan(price):
+                    daily_return = math.nan
+                    log_return = math.nan
+                else:
+                    daily_return = (price - previous_price) / previous_price
+                    log_return = math.log(price / previous_price)
+
+                writer.writerow(
+                    {
+                        field: row.get(field, "")
+                        for field in output_fields
+                        if field not in {"Return", "LogReturn"}
+                    }
+                    | {
+                        "Return": daily_return,
+                        "LogReturn": log_return,
+                    }
+                )
+                previous_price = None if math.isnan(price) else price
+
+    if observation_count == 0:
+        output_path.unlink()
         return None
 
     ticker = metadata.get("ticker", "").strip() or source_path.stem
@@ -138,18 +198,6 @@ def process_company_file(
         expected_dates, observed_dates
     )
 
-    output_fields = [
-        field
-        for field in source_fields
-        if field.strip().lower() not in METADATA_COLUMNS
-    ]
-    output_path = output_dir / f"{source_path.stem}-prep.csv"
-    with output_path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=output_fields, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({field: row.get(field, "") for field in output_fields})
-
     return {
         "Ticker": ticker,
         "Company": company,
@@ -158,7 +206,7 @@ def process_company_file(
         "Membership": membership,
         "FirstAvailableTradingDay": first_day.isoformat(),
         "LastAvailableTradingDay": last_day.isoformat(),
-        "NumberOfObservations": str(len(rows)),
+        "NumberOfObservations": str(observation_count),
         "ExpectedTradingDays": str(len(expected_dates)),
         "MissingExpectedTradingDays": str(len(missing_dates)),
         "LongestMissingTradingDays": str(longest_sessions),
