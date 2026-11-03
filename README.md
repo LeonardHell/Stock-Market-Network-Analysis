@@ -79,6 +79,20 @@ Run `python "Data Preprocessing.py"` after downloading the company histories. It
 
 Expected sessions are taken from the downloaded Yahoo Finance `^GSPC` daily history in `data/sp500_daily_50y.csv`. This provides a practical market-session calendar, but if Yahoo's index history itself omits a trading session, the script cannot identify that session as missing from this calendar.
 
+#### Longest-history sector heat map
+
+Run `python "Data Processing 0.1.py"` to select five sectors by the average observation count of each sector's five longest-history companies, then create a Pearson correlation heat map from their daily simple returns. The script sorts the 25 companies by sector, selects the earliest full calendar year in which all selected companies have valid returns for every `^GSPC` trading session, and saves the heat map, correlation matrix, and selected cohort manifest under `data/Results 0.1/`. The defaults can be scaled with `--sectors` and `--companies-per-sector`.
+
+The current 50-year data has tied sector scores because the Yahoo history window limits many companies to identical coverage. Ties are resolved alphabetically and documented in the cohort manifest. With these inputs, the first full common year is 1977, with 252 common sessions.
+
+#### Rolling sign-based co-movement
+
+Run `python "Data Processing 0.2.py"` to reuse the same 25-company cohort and calculate correlations between daily return signs (`-1` down, `0` unchanged, `+1` up). By default, it analyzes only the first three years of dates shared by all companies, using trailing 12-calendar-month windows stepped monthly. Use `--analysis-years` to change this time limit. For every window, it saves a company-by-company correlation matrix PNG under `data/Results 0.2/Sign-Based Co-Movement/rolling-heatmaps/` and a network PNG under `data/Results 0.2/Sign-Based Co-Movement/rolling-networks/`. The filenames are numbered and include the window dates; sort by name and scroll through the images in either folder. The heat maps group companies by sector, and graph nodes keep the same positions across windows to make changes easier to follow. Each graph shows the selected highest-correlation pairs (10% by default), with node color indicating sector and edge width scaled by absolute correlation.
+
+The `latest-sign-correlation-heatmap.png` and `latest-sign-correlation-network.png` files are convenient single-image copies of the final window. For compatibility, `rolling-sign-correlation-heatmap.png` is also updated to the final window's matrix; use the `rolling-heatmaps/` folder to browse all windows. Results are saved to `data/Results 0.2/Sign-Based Co-Movement/`.
+
+The source price files currently extend through 2026-10-30, the latest session in the local downloaded data; the analysis cannot include later sessions until the source data is refreshed. To change the rolling-window size, step, or graph density, use `--window-months`, `--step-months`, or `--edge-fraction`. The rolling-pair CSV contains the coefficients and common-session count used for each window.
+
 ### 2. Dependency estimation and network construction
 
 - Estimate pairwise dependencies within each historical time window.
