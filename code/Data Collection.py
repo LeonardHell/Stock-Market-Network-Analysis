@@ -220,7 +220,7 @@ def is_in_index(trading_day: date, constituent: Constituent) -> bool | None:
 
 
 def main() -> None:
-    project_dir = Path(__file__).resolve().parent
+    project_dir = Path(__file__).resolve().parent.parent
     default_constituents = (
         project_dir / "data" / "sp500_historical_constituents.csv"
     )

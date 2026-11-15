@@ -18,7 +18,7 @@ import networkx as nx
 import numpy as np
 
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_DIR / "data"
 COHORT_PATH = DATA_DIR / "Results 0.1" / "sector-grouped-analysis-cohort.csv"
 COMPANY_DATA_DIR = DATA_DIR / "companies-prep"

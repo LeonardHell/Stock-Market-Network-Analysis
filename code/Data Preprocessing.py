@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 COMPANY_DIR = PROJECT_DIR / "data" / "companies"
 OUTPUT_DIR = PROJECT_DIR / "data" / "companies-prep"
 COMPANY_SUMMARY_PATH = PROJECT_DIR / "data" / "company-summary-prep.csv"

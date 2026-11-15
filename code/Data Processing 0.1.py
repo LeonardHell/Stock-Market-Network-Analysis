@@ -20,7 +20,7 @@ from matplotlib.colors import Normalize
 import numpy as np
 
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_DIR / "data" / "Results 0.1"
 COMPANY_SUMMARY = DATA_DIR / "company-summary-prep.csv"
 COMPANY_DATA_DIR = DATA_DIR / "companies-prep"
