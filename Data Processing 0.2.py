@@ -547,17 +547,17 @@ def write_edges(path: Path, edges: list[dict[str, object]]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Analyze co-direction of daily stock returns in monthly-rolling "
+            "Analyze co-direction of daily stock returns in yearly-stepped "
             "one-year windows."
         )
     )
     parser.add_argument("--window-months", type=int, default=12)
-    parser.add_argument("--step-months", type=int, default=1)
+    parser.add_argument("--step-months", type=int, default=12)
     parser.add_argument(
         "--analysis-years",
         type=int,
-        default=3,
-        help="Limit analysis to this many years from the first shared session.",
+        default=15,
+        help="Limit analysis to this many years from the first complete window.",
     )
     parser.add_argument("--edge-fraction", type=float, default=0.10)
     parser.add_argument("--cohort", type=Path, default=COHORT_PATH)
@@ -577,18 +577,13 @@ def main() -> None:
     signs = load_signs(cohort, args.company_data.expanduser())
     calendar = load_calendar(args.calendar.expanduser())
     windows = rolling_windows(calendar, signs, args.window_months)
-    all_tickers = list(signs)
-    mutual_dates = [
-        trading_day
-        for trading_day in calendar
-        if all(trading_day in signs[ticker] for ticker in all_tickers)
-    ]
-    analysis_end = shift_year(mutual_dates[0], args.analysis_years)
+    analysis_end = shift_year(windows[0][0], args.analysis_years)
     windows = [window for window in windows if window[1] <= analysis_end]
     if not windows:
         raise ValueError(
             f"No complete {args.window_months}-month windows fit within the "
-            f"first {args.analysis_years} years of shared data."
+            f"first {args.analysis_years} years from the first complete "
+            "window."
         )
     if args.step_months > 1:
         stepped_windows = windows[::args.step_months]
@@ -642,8 +637,8 @@ def main() -> None:
         f"{latest_window[0]}–{latest_window[1]}."
     )
     print(
-        f"Analysis limited to the first {args.analysis_years} years of shared "
-        f"data, through {analysis_end}."
+        f"Analysis limited to {args.analysis_years} years from the first "
+        f"complete window ({windows[0][0]}), through {analysis_end}."
     )
     print(
         f"Latest window uses {len(latest_window[2])} common trading sessions; "
