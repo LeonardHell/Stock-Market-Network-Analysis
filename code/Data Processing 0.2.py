@@ -214,6 +214,50 @@ def pair_records(
     return records
 
 
+def aggregate_sector_correlations(
+    cohort: list[dict[str, str]], correlation: np.ndarray
+) -> tuple[list[str], np.ndarray, np.ndarray]:
+    sectors = list(dict.fromkeys(row["Sector"].strip() for row in cohort))
+    indices_by_sector = {
+        sector: [
+            index
+            for index, company in enumerate(cohort)
+            if company["Sector"].strip() == sector
+        ]
+        for sector in sectors
+    }
+    averages = np.full((len(sectors), len(sectors)), np.nan)
+    pair_counts = np.zeros((len(sectors), len(sectors)), dtype=int)
+
+    for left_index, left_sector in enumerate(sectors):
+        for right_index in range(left_index, len(sectors)):
+            right_sector = sectors[right_index]
+            if left_index == right_index:
+                pairs = itertools.combinations(
+                    indices_by_sector[left_sector], 2
+                )
+            else:
+                pairs = itertools.product(
+                    indices_by_sector[left_sector],
+                    indices_by_sector[right_sector],
+                )
+            values = np.asarray(
+                [
+                    correlation[company_1, company_2]
+                    for company_1, company_2 in pairs
+                ],
+                dtype=float,
+            )
+            finite_values = values[np.isfinite(values)]
+            if finite_values.size:
+                averages[left_index, right_index] = finite_values.mean()
+                averages[right_index, left_index] = finite_values.mean()
+                pair_counts[left_index, right_index] = finite_values.size
+                pair_counts[right_index, left_index] = finite_values.size
+
+    return sectors, averages, pair_counts
+
+
 def plot_window_matrix(
     correlation: np.ndarray,
     cohort: list[dict[str, str]],
@@ -268,6 +312,69 @@ def plot_window_matrix(
     fig.subplots_adjust(left=0.15, right=0.9, bottom=0.1, top=0.82)
     fig.savefig(output_path, dpi=120)
     plt.close(fig)
+
+
+def plot_sector_window_matrix(
+    sectors: list[str],
+    averages: np.ndarray,
+    pair_counts: np.ndarray,
+    window: tuple[date, date, list[date]],
+    output_path: Path,
+) -> None:
+    figure, axis = plt.subplots(figsize=(11, 9))
+    image = axis.imshow(
+        averages,
+        cmap="RdBu_r",
+        norm=Normalize(vmin=-1, vmax=1),
+        interpolation="nearest",
+    )
+    positions = np.arange(len(sectors))
+    labels = [textwrap.fill(sector, width=16) for sector in sectors]
+    axis.set_xticks(positions, labels=labels, rotation=35, ha="left")
+    axis.set_yticks(positions, labels=labels)
+    axis.xaxis.tick_top()
+    axis.tick_params(length=0)
+
+    for row_index in range(len(sectors)):
+        for column_index in range(len(sectors)):
+            average = averages[row_index, column_index]
+            value_label = f"{average:.2f}" if math.isfinite(average) else "N/A"
+            pair_count = pair_counts[row_index, column_index]
+            axis.text(
+                column_index,
+                row_index,
+                f"{value_label}\n(n={pair_count})",
+                ha="center",
+                va="center",
+                fontsize=9,
+                bbox={
+                    "facecolor": "white",
+                    "alpha": 0.7,
+                    "edgecolor": "none",
+                    "pad": 1.5,
+                },
+            )
+
+    axis.set_title(
+        "Mean pairwise return-sign correlation by sector\n"
+        f"{window[0]} to {window[1]} ({len(window[2])} common sessions)",
+        pad=22,
+    )
+    colorbar = figure.colorbar(image, ax=axis, fraction=0.045, pad=0.04)
+    colorbar.set_label("Mean Pearson correlation of return signs")
+    axis.set_xlabel("Sector")
+    axis.set_ylabel("Sector")
+    figure.text(
+        0.5,
+        0.015,
+        "Diagonal cells average distinct stock pairs only; n is the number "
+        "of finite pair correlations.",
+        ha="center",
+        fontsize=9,
+    )
+    figure.subplots_adjust(left=0.2, right=0.88, bottom=0.14, top=0.78)
+    figure.savefig(output_path, dpi=120, bbox_inches="tight")
+    plt.close(figure)
 
 
 def select_top_edges(
@@ -440,42 +547,64 @@ def render_window_frames(
     cohort: list[dict[str, str]],
     windows: list[tuple[date, date, list[date]]],
     correlations: list[np.ndarray],
+    sector_correlations: list[tuple[list[str], np.ndarray, np.ndarray]],
     pair_rows_by_window: list[list[dict[str, object]]],
     edge_fraction: float,
     heatmap_dir: Path,
+    sector_heatmap_dir: Path,
     network_dir: Path,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path]:
     if not (
-        len(windows) == len(correlations) == len(pair_rows_by_window)
+        len(windows)
+        == len(correlations)
+        == len(sector_correlations)
+        == len(pair_rows_by_window)
     ):
         raise ValueError(
             "Each rolling window must have a correlation matrix and pair rows."
         )
-    for directory in (heatmap_dir, network_dir):
+    for directory in (heatmap_dir, sector_heatmap_dir, network_dir):
         directory.mkdir(parents=True, exist_ok=True)
         for old_frame in directory.glob("window-*.png"):
             old_frame.unlink()
 
     latest_heatmap: Path | None = None
+    latest_sector_heatmap: Path | None = None
     latest_network: Path | None = None
-    for index, (window, correlation, pair_rows) in enumerate(
-        zip(windows, correlations, pair_rows_by_window),
+    for index, (
+        window,
+        correlation,
+        sector_correlation,
+        pair_rows,
+    ) in enumerate(
+        zip(windows, correlations, sector_correlations, pair_rows_by_window),
         start=1,
     ):
         frame_name = (
             f"window-{index:05d}_{window[0]}_{window[1]}.png"
         )
         heatmap_path = heatmap_dir / frame_name
+        sector_heatmap_path = sector_heatmap_dir / frame_name
         network_path = network_dir / frame_name
         plot_window_matrix(correlation, cohort, window, heatmap_path)
+        plot_sector_window_matrix(
+            *sector_correlation,
+            window,
+            sector_heatmap_path,
+        )
         edges = select_top_edges(pair_rows, edge_fraction)
         plot_network(cohort, edges, window, network_path)
         latest_heatmap = heatmap_path
+        latest_sector_heatmap = sector_heatmap_path
         latest_network = network_path
 
-    if latest_heatmap is None or latest_network is None:
+    if (
+        latest_heatmap is None
+        or latest_sector_heatmap is None
+        or latest_network is None
+    ):
         raise ValueError("Cannot render rolling visualizations without windows.")
-    return latest_heatmap, latest_network
+    return latest_heatmap, latest_sector_heatmap, latest_network
 
 
 def write_pair_history(
@@ -517,6 +646,46 @@ def write_pair_history(
                         else "NaN"
                     ),
                 })
+
+
+def write_sector_history(
+    path: Path,
+    sector_correlations: list[tuple[list[str], np.ndarray, np.ndarray]],
+    windows: list[tuple[date, date, list[date]]],
+) -> None:
+    fields = [
+        "WindowStart",
+        "WindowEnd",
+        "CommonTradingSessions",
+        "Sector1",
+        "Sector2",
+        "MeanSignCorrelation",
+        "DistinctStockPairs",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fields)
+        writer.writeheader()
+        for window, (sectors, averages, pair_counts) in zip(
+            windows, sector_correlations
+        ):
+            for left_index, left_sector in enumerate(sectors):
+                for right_index in range(left_index, len(sectors)):
+                    average = float(averages[left_index, right_index])
+                    writer.writerow({
+                        "WindowStart": window[0].isoformat(),
+                        "WindowEnd": window[1].isoformat(),
+                        "CommonTradingSessions": len(window[2]),
+                        "Sector1": left_sector,
+                        "Sector2": sectors[right_index],
+                        "MeanSignCorrelation": (
+                            f"{average:.12g}"
+                            if math.isfinite(average)
+                            else "NaN"
+                        ),
+                        "DistinctStockPairs": int(
+                            pair_counts[left_index, right_index]
+                        ),
+                    })
 
 
 def write_edges(path: Path, edges: list[dict[str, object]]) -> None:
@@ -594,28 +763,48 @@ def main() -> None:
     sector_order = list(dict.fromkeys(row["Sector"].strip() for row in cohort))
     pair_rows_by_window: list[list[dict[str, object]]] = []
     correlations: list[np.ndarray] = []
+    sector_correlations: list[
+        tuple[list[str], np.ndarray, np.ndarray]
+    ] = []
     for _, _, common_dates in windows:
         correlation = calculate_correlation(cohort, signs, common_dates)
         correlations.append(correlation)
+        sector_correlations.append(
+            aggregate_sector_correlations(cohort, correlation)
+        )
         pair_rows_by_window.append(pair_records(cohort, correlation))
 
     output_dir = args.output_dir.expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
     heatmap_dir = output_dir / "rolling-heatmaps"
+    sector_heatmap_dir = output_dir / "rolling-sector-heatmaps"
     network_dir = output_dir / "rolling-networks"
     rolling_heatmap = output_dir / "rolling-sign-correlation-heatmap.png"
+    rolling_sector_heatmap = (
+        output_dir / "rolling-sector-correlation-heatmap.png"
+    )
     latest_heatmap = output_dir / "latest-sign-correlation-heatmap.png"
+    latest_sector_heatmap = (
+        output_dir / "latest-sector-correlation-heatmap.png"
+    )
     network_path = output_dir / "latest-sign-correlation-network.png"
     history_path = output_dir / "rolling-sign-correlations.csv"
+    sector_history_path = output_dir / "rolling-sector-correlations.csv"
     edges_path = output_dir / "latest-network-edges.csv"
 
-    latest_heatmap_frame, latest_network_frame = render_window_frames(
+    (
+        latest_heatmap_frame,
+        latest_sector_heatmap_frame,
+        latest_network_frame,
+    ) = render_window_frames(
         cohort,
         windows,
         correlations,
+        sector_correlations,
         pair_rows_by_window,
         args.edge_fraction,
         heatmap_dir,
+        sector_heatmap_dir,
         network_dir,
     )
     latest_window = windows[-1]
@@ -623,8 +812,11 @@ def main() -> None:
     latest_edges = select_top_edges(latest_pairs, args.edge_fraction)
     shutil.copyfile(latest_heatmap_frame, latest_heatmap)
     shutil.copyfile(latest_heatmap_frame, rolling_heatmap)
+    shutil.copyfile(latest_sector_heatmap_frame, latest_sector_heatmap)
+    shutil.copyfile(latest_sector_heatmap_frame, rolling_sector_heatmap)
     shutil.copyfile(latest_network_frame, network_path)
     write_pair_history(history_path, pair_rows_by_window, windows)
+    write_sector_history(sector_history_path, sector_correlations, windows)
     write_edges(edges_path, latest_edges)
 
     print(f"Companies: {len(cohort)} across {len(sector_order)} sectors.")
@@ -645,10 +837,13 @@ def main() -> None:
         f"selected {len(latest_edges)} highest-correlation edges."
     )
     print(f"Rolling heat maps: {heatmap_dir}")
+    print(f"Rolling sector heat maps: {sector_heatmap_dir}")
     print(f"Rolling network graphs: {network_dir}")
     print(f"Latest correlation matrix: {latest_heatmap}")
+    print(f"Latest sector correlation matrix: {latest_sector_heatmap}")
     print(f"Latest network graph: {network_path}")
     print(f"Rolling pair correlations: {history_path}")
+    print(f"Rolling sector correlations: {sector_history_path}")
     print(f"Latest edge list: {edges_path}")
 
 
