@@ -95,6 +95,10 @@ The `latest-sign-correlation-heatmap.png` and `latest-sign-correlation-network.p
 
 The source price files currently extend through 2026-10-30, the latest session in the local downloaded data; the analysis cannot include later sessions until the source data is refreshed. To change the rolling-window size, step, or graph density, use `--window-months`, `--step-months`, or `--edge-fraction`. The rolling-pair CSV contains the coefficients and common-session count used for each window.
 
+#### Monthly return correlation by time distance
+
+Run `python "Data Processing 0.3.py"` to use the 25 companies in `data/Results 0.1/sector-grouped-analysis-cohort.csv` and plot average correlation of monthly simple returns at month lags 0 through 24 using all available monthly data. Each correlation compares one company's return in a month with a different company's return at the lagged month; the average includes both directions of every distinct company pair. Error bars show plus/minus one sample standard deviation across the pairwise correlations. A separate time-series plot shows the one-month-lag correlation in 12-month rolling windows stepped monthly, spanning the available history. A further plot uses daily adjusted closes from `data/companies-prep/` to calculate each month's average price over its first 1 through 80 available trading-day observations, then calculates returns between consecutive monthly averages and averages the cross-company correlations. This plot retains the 15-year window. Pairwise correlations use available finite returns; constant or insufficient series are skipped. Plots and CSVs with correlation, standard-deviation, and pair-count details are saved to `data/Results 0.3/Monthly Lagged Correlation/`. Use `--window-years`, `--max-lag-months`, `--max-averaged-days`, `--rolling-window-months`, `--cohort`, `--monthly-data-dir`, `--daily-data-dir`, or `--output-dir` to change the defaults.
+
 ### 2. Dependency estimation and network construction
 
 - Estimate pairwise dependencies within each historical time window.
