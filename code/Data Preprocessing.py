@@ -16,9 +16,11 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 COMPANY_DIR = PROJECT_DIR / "data" / "companies"
 OUTPUT_DIR = PROJECT_DIR / "data" / "companies-prep"
+MONTHLY_OUTPUT_DIR = PROJECT_DIR / "data" / "companies-prep-month"
 COMPANY_SUMMARY_PATH = PROJECT_DIR / "data" / "company-summary-prep.csv"
 SECTOR_SUMMARY_PATH = PROJECT_DIR / "data" / "sector-summary-prep.csv"
 INDEX_CALENDAR = PROJECT_DIR / "data" / "sp500_daily_50y.csv"
+INCLUDE_INCOMPLETE_MONTHS = True
 
 METADATA_COLUMNS = {
     "membership",
@@ -97,6 +99,58 @@ def longest_missing_streak(
     return longest_sessions, longest_calendar_days
 
 
+def write_monthly_company_file(
+    source_path: Path,
+    price_column: str,
+    monthly_prices: dict[date, list[float]],
+    monthly_observed_dates: dict[date, set[date]],
+    calendar: list[date],
+    output_dir: Path,
+) -> None:
+    expected_dates_by_month: dict[date, set[date]] = {}
+    for trading_day in calendar:
+        month_start = date(trading_day.year, trading_day.month, 1)
+        expected_dates_by_month.setdefault(month_start, set()).add(trading_day)
+
+    output_path = output_dir / f"{source_path.stem}-prep.csv"
+    previous_average: float | None = None
+    with output_path.open("w", newline="", encoding="utf-8") as output_file:
+        writer = csv.DictWriter(
+            output_file,
+            fieldnames=["Date", price_column, "Return", "LogReturn"],
+        )
+        writer.writeheader()
+        for month_start in sorted(monthly_prices):
+            expected_dates = expected_dates_by_month.get(month_start, set())
+            observed_dates = monthly_observed_dates[month_start]
+            if not INCLUDE_INCOMPLETE_MONTHS and (
+                not expected_dates or not expected_dates.issubset(observed_dates)
+            ):
+                continue
+
+            average_price = math.fsum(monthly_prices[month_start]) / len(
+                monthly_prices[month_start]
+            )
+            if previous_average is None:
+                monthly_return = math.nan
+                log_return = math.nan
+            else:
+                monthly_return = (
+                    average_price - previous_average
+                ) / previous_average
+                log_return = math.log(average_price / previous_average)
+
+            writer.writerow(
+                {
+                    "Date": month_start.isoformat(),
+                    price_column: average_price,
+                    "Return": monthly_return,
+                    "LogReturn": log_return,
+                }
+            )
+            previous_average = average_price
+
+
 def process_company_file(
     source_path: Path, calendar: list[date], output_dir: Path
 ) -> dict[str, str] | None:
@@ -127,6 +181,8 @@ def process_company_file(
         metadata: dict[str, str] = {}
         observation_count = 0
         previous_price: float | None = None
+        monthly_prices: dict[date, list[float]] = {}
+        monthly_observed_dates: dict[date, set[date]] = {}
         with output_path.open("w", newline="", encoding="utf-8") as output_file:
             writer = csv.DictWriter(
                 output_file,
@@ -140,6 +196,8 @@ def process_company_file(
                 )
                 observed_dates.add(observed_day)
                 observation_count += 1
+                month_start = date(observed_day.year, observed_day.month, 1)
+                monthly_observed_dates.setdefault(month_start, set())
                 for key, value in row.items():
                     if (
                         key is not None
@@ -154,6 +212,10 @@ def process_company_file(
                     price = math.nan
                 if not math.isfinite(price) or price <= 0:
                     price = math.nan
+
+                if not math.isnan(price):
+                    monthly_prices.setdefault(month_start, []).append(price)
+                    monthly_observed_dates[month_start].add(observed_day)
 
                 if previous_price is None or math.isnan(price):
                     daily_return = math.nan
@@ -177,7 +239,21 @@ def process_company_file(
 
     if observation_count == 0:
         output_path.unlink()
+        monthly_output_path = (
+            MONTHLY_OUTPUT_DIR / f"{source_path.stem}-prep.csv"
+        )
+        if monthly_output_path.is_file():
+            monthly_output_path.unlink()
         return None
+
+    write_monthly_company_file(
+        source_path,
+        price_column,
+        monthly_prices,
+        monthly_observed_dates,
+        calendar,
+        MONTHLY_OUTPUT_DIR,
+    )
 
     ticker = metadata.get("ticker", "").strip() or source_path.stem
     company = metadata.get("company", "").strip() or ticker
@@ -266,6 +342,7 @@ def main() -> None:
 
     calendar = read_calendar(INDEX_CALENDAR)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    MONTHLY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     company_rows: list[dict[str, str]] = []
     for source_path in sorted(COMPANY_DIR.glob("*.csv")):
@@ -281,7 +358,8 @@ def main() -> None:
     write_sector_summary(SECTOR_SUMMARY_PATH, company_summary_path)
     print(
         f"Processed {len(company_rows)} companies. Prepared per-ticker files "
-        f"are in {OUTPUT_DIR}; summary tables are in {PROJECT_DIR / 'data'}."
+        f"are in {OUTPUT_DIR}, with monthly files in {MONTHLY_OUTPUT_DIR}; "
+        f"summary tables are in {PROJECT_DIR / 'data'}."
     )
     print(
         f"Expected trading dates were read from Yahoo Finance ^GSPC history: "
